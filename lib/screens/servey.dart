@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -58,7 +59,7 @@ class _DeviceCheckScreenState extends State<DeviceCheckScreen> {
     if (Platform.isAndroid) {
       return (await deviceInfo.androidInfo).id;
     } else if (Platform.isIOS) {
-      return (await deviceInfo.iosInfo).identifierForVendor ?? 'unknown_ios';
+      return (await deviceInfo.iosInfo).identifierForVendor ?? '';
     }
     return 'unknown_device';
   }
@@ -99,46 +100,54 @@ class _SurveyFormState extends State<SurveyForm> {
   String _error = '';
 
   
-  Future<void> _submitForm() async {
-    if (!_formKey.currentState!.validate()) return;
+ Future<void> _submitForm() async {
+  if (!_formKey.currentState!.validate()) return;
 
-    setState(() {
-      _isSubmitting = true;
-      _error = '';
-    });
+  setState(() {
+    _isSubmitting = true;
+    _error = '';
+  });
 
-    try {
-      final response = await http.post(
-        Uri.parse('http://10.0.0.2:8000/api/create-user/'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'device_id': widget.deviceId,
-          'name': _nameController.text.trim(),
-          'age': int.parse(_ageController.text),
-        }),
-      ).timeout(const Duration(seconds: 10));
+  try {
+    print('Sending request to server...');
+    final response = await http.post(
+      Uri.parse('http://10.0.2.2:8000/api/user/'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'device_id': widget.deviceId,
+        'name': _nameController.text.trim(),
+        'age': int.parse(_ageController.text),
+      }),
+    ).timeout(const Duration(seconds: 15));
 
-      final responseData = jsonDecode(response.body);
-      
-      if (response.statusCode == 201) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (_) => Home(deviceId: widget.deviceId,),
-          ),
-        );
-      } else {
-        throw Exception(responseData['error'] ?? 'Survey failed');
-      }
-    } catch (e) {
-      setState(() => _error = e.toString());
-    } finally {
-      if (mounted) {
-        setState(() => _isSubmitting = false);
-      }
+    print('Response received: ${response.statusCode}');
+    
+    final responseData = jsonDecode(response.body);
+    
+    if (response.statusCode == 201) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => Home(deviceId: widget.deviceId),
+        ),
+      );
+    } else {
+      throw Exception(responseData['error'] ?? 'Survey failed with status ${response.statusCode}');
+    }
+  } on TimeoutException {
+    setState(() => _error = 'Server is taking too long to respond. Please try again later.');
+  } on SocketException {
+    setState(() => _error = 'Could not connect to server. Check your internet connection.');
+  } on FormatException {
+    setState(() => _error = 'Invalid server response. Please contact support.');
+  } catch (e) {
+    setState(() => _error = 'Error: ${e.toString().replaceAll('Exception: ', '')}');
+  } finally {
+    if (mounted) {
+      setState(() => _isSubmitting = false);
     }
   }
-
+}
   @override
   void dispose() {
     _nameController.dispose();

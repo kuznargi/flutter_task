@@ -4,6 +4,75 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:audioplayers/audioplayers.dart';
 
+void main() {
+  runApp(const MyApp());
+}
+
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Piano Game',
+      theme: ThemeData(
+        primarySwatch: Colors.blue,
+        visualDensity: VisualDensity.adaptivePlatformDensity,
+      ),
+      home: const HomeScreen(),
+    );
+  }
+}
+
+class HomeScreen extends StatefulWidget {
+  const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  final TextEditingController _deviceIdController = TextEditingController();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Enter Device ID')),
+      body: Padding(
+        padding: const EdgeInsets.all(20.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            TextField(
+              controller: _deviceIdController,
+              decoration: const InputDecoration(
+                labelText: 'Device ID',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: () {
+                if (_deviceIdController.text.isNotEmpty) {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder:
+                          (context) =>
+                              PianoGame(deviceId: _deviceIdController.text),
+                    ),
+                  );
+                }
+              },
+              child: const Text('Start Piano Game'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class PianoGame extends StatefulWidget {
   final String deviceId;
   const PianoGame({super.key, required this.deviceId});
@@ -14,76 +83,131 @@ class PianoGame extends StatefulWidget {
 
 class _PianoGameState extends State<PianoGame> {
   final AudioPlayer audioPlayer = AudioPlayer();
-  List<String> allNotes = ['Do', 'Re', 'Mi', 'Fa', 'Sol', 'La', 'Ti'];
-  // Все возможные ноты
-  List<String> targetNotes = []; // Ноты из БД (которые нужно нажимать)
+  final List<String> allNotes = ['Do', 'Re', 'Mi', 'Fa', 'Sol', 'La', 'Ti'];
+  List<String> targetNotes = [];
   String? currentTargetNote;
   int score = 0;
-  bool isGameActive = true;
+  bool isGameActive = false;
   bool isLoading = true;
   String error = '';
 
   final Map<String, Color> noteColors = {
-    'C': Colors.red,
-    'D': Colors.orange,
-    'E': Colors.yellow,
-    'F': Colors.green,
-    'G': Colors.blue,
-    'A': Colors.indigo,
-    'B': Colors.purple,
+    'Do': Colors.red,
+    'Re': Colors.orange,
+    'Mi': Colors.yellow,
+    'Fa': Colors.green,
+    'Sol': Colors.blue,
+    'La': Colors.indigo,
+    'Ti': Colors.purple,
   };
 
   @override
   void initState() {
     super.initState();
-    _fetchTargetNotes();
+    _fetchPianoNotes();
   }
 
-  Future<void> _fetchTargetNotes() async {
+  Future<void> _fetchPianoNotes() async {
     try {
-      final response = await http.get(
-        Uri.parse(
-          'http://10.0.2.2:8000/api/piano/',
-        ).replace(queryParameters: {'device_id': widget.deviceId}),
-        headers: {'Accept': 'application/json'},
-      );
+      // First fetch piano records to get note IDs
+      final pianoUri = Uri.parse(
+        'http://10.0.2.2:8000/api/piano/',
+      ).replace(queryParameters: {'device_id': widget.deviceId});
 
-      if (response.statusCode == 200) {
-        final List<dynamic> data = jsonDecode(response.body);
-        final List<String> notes = [];
+      debugPrint("Fetching piano records from: ${pianoUri.toString()}");
 
-        for (final item in data) {
-          if (item is Map) {
-            if (item['note_name'] != null) {
-              notes.add(item['note_name'].toString());
-            } else if (item['note'] is Map && item['note']['name'] != null) {
-              notes.add(item['note']['name'].toString());
+      final pianoResponse = await http
+          .get(pianoUri, headers: {'Accept': 'application/json'})
+          .timeout(const Duration(seconds: 10));
+
+      debugPrint("Piano response status: ${pianoResponse.statusCode}");
+      debugPrint("Piano response body: ${pianoResponse.body}");
+
+      if (pianoResponse.statusCode == 200) {
+        final List<dynamic> pianoData = jsonDecode(pianoResponse.body);
+        final noteIds = <int>[];
+
+        // Extract note IDs from piano records
+        for (final item in pianoData) {
+          try {
+            if (item['note'] != null) {
+              noteIds.add(item['note'] as int);
             }
+          } catch (e) {
+            debugPrint("Error parsing note ID: $e");
           }
         }
 
-        setState(() {
-          targetNotes = notes;
-          isLoading = false;
-          if (targetNotes.isNotEmpty) {
-            generateNewTarget();
-          } else {
-            error = 'No target notes found';
+        if (noteIds.isNotEmpty) {
+          // Now fetch note names using the IDs
+          final notesUri = Uri.parse('http://10.0.2.2:8000/api/note/').replace(
+            queryParameters: {
+              'ids': noteIds.join(','),
+              'device_id': widget.deviceId,
+            },
+          );
+
+          debugPrint("Fetching note details from: ${notesUri.toString()}");
+
+          final notesResponse = await http
+              .get(notesUri, headers: {'Accept': 'application/json'})
+              .timeout(const Duration(seconds: 10));
+
+          debugPrint("Notes response status: ${notesResponse.statusCode}");
+          debugPrint("Notes response body: ${notesResponse.body}");
+
+          if (notesResponse.statusCode == 200) {
+            final List<dynamic> notesData = jsonDecode(notesResponse.body);
+            final List<String> notes = [];
+
+            for (final noteItem in notesData) {
+              try {
+                if (noteItem['name'] != null) {
+                  final noteName = noteItem['name'].toString();
+                  if (allNotes.contains(noteName)) {
+                    notes.add(noteName);
+                  }
+                }
+              } catch (e) {
+                debugPrint("Error parsing note name: $e");
+              }
+            }
+
+            setState(() {
+              if (notes.isNotEmpty) {
+                targetNotes = notes;
+                isGameActive = true;
+                error = '';
+                generateNewTarget();
+              } else {
+                error = 'No valid notes received from server';
+              }
+              isLoading = false;
+            });
+            return;
           }
-        });
-      } else {
-        throw Exception('Failed to load notes');
+        }
       }
+
+      // If we get here, something went wrong
+      throw Exception('Failed to load notes');
     } catch (e) {
+      debugPrint("Error in _fetchPianoNotes: $e");
       setState(() {
-        error = e.toString();
+        error = 'Failed to load notes: ${e.toString()}';
         isLoading = false;
       });
     }
   }
 
   void generateNewTarget() {
-    if (targetNotes.isEmpty) return;
+    if (targetNotes.isEmpty) {
+      setState(() {
+        error = 'No notes available';
+        isGameActive = false;
+      });
+      return;
+    }
     setState(() {
       currentTargetNote = targetNotes[Random().nextInt(targetNotes.length)];
     });
@@ -102,8 +226,8 @@ class _PianoGameState extends State<PianoGame> {
     } else {
       setState(() {
         isGameActive = false;
-        showGameOverDialog();
       });
+      showGameOverDialog();
     }
   }
 
@@ -116,12 +240,14 @@ class _PianoGameState extends State<PianoGame> {
   }
 
   void playSound(String note) async {
-    if (note.isNotEmpty) {
+    try {
       await audioPlayer.play(AssetSource('sounds/$note.mp3'));
+    } catch (e) {
+      debugPrint("Error playing sound: $e");
     }
   }
 
-   void showGameOverDialog() {
+  void showGameOverDialog() {
     showDialog(
       context: context,
       builder: (BuildContext context) {
@@ -134,7 +260,7 @@ class _PianoGameState extends State<PianoGame> {
                 Navigator.of(context).pop();
                 resetGame();
               },
-              child: const Text('Play again'),
+              child: const Text('Play Again'),
             ),
           ],
         );
@@ -145,18 +271,35 @@ class _PianoGameState extends State<PianoGame> {
   @override
   Widget build(BuildContext context) {
     if (isLoading) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
-    }
-
-    if (error.isNotEmpty) {
-      return Scaffold(
+      return const Scaffold(
         body: Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Text(error),
+              CircularProgressIndicator(),
+              SizedBox(height: 16),
+              Text('Loading piano notes from server...'),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (error.isNotEmpty || !isGameActive) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Error')),
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                error,
+                style: const TextStyle(fontSize: 16, color: Colors.red),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
               ElevatedButton(
-                onPressed: _fetchTargetNotes,
+                onPressed: _fetchPianoNotes,
                 child: const Text('Retry'),
               ),
             ],
@@ -165,19 +308,26 @@ class _PianoGameState extends State<PianoGame> {
       );
     }
 
-    return Column(
-      children: [
-        Expanded(
-          child: Container(
-            padding: const EdgeInsets.all(20),
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Piano Game'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _fetchPianoNotes,
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(16),
             color: Colors.grey[200],
             child: Center(
               child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   const Icon(Icons.music_note, size: 40),
-                  const SizedBox(height: 10),
-                 
+                  const SizedBox(height: 8),
                   Text(
                     currentTargetNote ?? '',
                     style: const TextStyle(
@@ -186,77 +336,87 @@ class _PianoGameState extends State<PianoGame> {
                       color: Colors.indigo,
                     ),
                   ),
-                  const SizedBox(height: 20),
+                  const SizedBox(height: 8),
                   Text('Score: $score', style: const TextStyle(fontSize: 24)),
                 ],
               ),
             ),
           ),
-        ),
-
-      
-        Expanded(
-          flex: 2,
-          child: Stack(
-            children: [
-              Row(
-                children: List.generate(allNotes.length, (index) {
-                  final note = allNotes[index];
-                  return Expanded(
-                    child: GestureDetector(
-                      onTap: () => handleNoteTap(note),
-                      child: Container(
-                        margin: const EdgeInsets.all(1),
-                        decoration: BoxDecoration(
-                          color: noteColors[note] ?? Colors.grey,
-                        ),
-                        child: Align(
-                          alignment: Alignment.bottomCenter,
-                          child: Padding(
-                            padding: const EdgeInsets.only(bottom: 10),
-                            child: Text(
-                              note,
-                              style: const TextStyle(
-                                color: Colors.black,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 24,
+          Expanded(
+            child: Stack(
+              children: [
+                Row(
+                  children:
+                      allNotes.map((note) {
+                        return Expanded(
+                          child: GestureDetector(
+                            onTap: () => handleNoteTap(note),
+                            child: Container(
+                              margin: const EdgeInsets.all(1),
+                              decoration: BoxDecoration(
+                                color: noteColors[note] ?? Colors.grey,
+                                border:
+                                    note == currentTargetNote
+                                        ? Border.all(
+                                          color: Colors.white,
+                                          width: 3,
+                                        )
+                                        : null,
+                              ),
+                              child: Align(
+                                alignment: Alignment.bottomCenter,
+                                child: Padding(
+                                  padding: const EdgeInsets.only(bottom: 12),
+                                  child: Text(
+                                    note,
+                                    style: const TextStyle(
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.black,
+                                    ),
+                                  ),
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                      ),
-                    ),
-                  );
-                }),
-              ),
-              // Черные клавиши
-              Positioned.fill(
-                child: Row(
-                  children: List.generate(allNotes.length - 1, (index) {
-                    if (index != 2 && index != 6) {
-                      return Expanded(
-                        child: Align(
-                          alignment: Alignment.center,
-                          child: Container(
-                            width: 40,
-                            height: 120,
-                            decoration: BoxDecoration(
-                              color: Colors.black,
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                          ),
-                        ),
-                      );
-                    } else {
-                      return const Expanded(child: SizedBox());
-                    }
-                  }),
+                        );
+                      }).toList(),
                 ),
-              ),
-            ],
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  top: 0,
+                  height: 120,
+                  child: Row(
+                    children: [
+                      for (int i = 0; i < allNotes.length - 1; i++)
+                        if (i != 2 && i != 6)
+                          Expanded(
+                            child: Align(
+                              alignment: Alignment.center,
+                              child: GestureDetector(
+                                onTap: () => handleNoteTap(allNotes[i]),
+                                child: Container(
+                                  width: 36,
+                                  height: 120,
+                                  decoration: BoxDecoration(
+                                    color: Colors.black,
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          )
+                        else
+                          const Expanded(child: SizedBox()),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }

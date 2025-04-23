@@ -174,15 +174,19 @@ class _HomeState extends State<Home> {
               if (course.illustration.isNotEmpty)
                 AspectRatio(
                   aspectRatio: 16 / 9,
-                  child: Image.network(
-                    course.illustration,
-                    fit: BoxFit.cover,
-                    errorBuilder:
-                        (_, __, ___) => Container(
-                          color: Colors.grey[200],
-                          child: const Icon(Icons.broken_image),
-                        ),
-                  ),
+                  child:
+                 Image.network(
+  course.illustration,
+   headers: {"User-Agent": "Mozilla/5.0"}, 
+  fit: BoxFit.cover,
+  errorBuilder: (_, error, __) {
+    print('Image load error: $error'); // Добавьте это
+    return Container(
+      color: Colors.grey[200],
+      child: const Icon(Icons.broken_image),
+    );
+  },
+)
                 ),
               const SizedBox(height: 12),
               Text(
