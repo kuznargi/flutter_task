@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_app/models/courseModel.dart';
+import 'package:flutter_app/screens/piano.dart';
 import 'package:flutter_widget_from_html/flutter_widget_from_html.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
@@ -22,6 +23,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
   Course? course;
   bool isLoading = true;
   String error = '';
+  int? pianoId;
 
   @override
   void initState() {
@@ -40,8 +42,10 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
       ).timeout(const Duration(seconds: 10));
 
       if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
         setState(() {
-          course = Course.fromJson(jsonDecode(response.body));
+          course = Course.fromJson(data);
+          pianoId = data['piano_id'];
           isLoading = false;
         });
       } else {
@@ -53,6 +57,25 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
         isLoading = false;
       });
     }
+  }
+
+  bool _handleHtmlLinkTap(String url) {
+    if (url.startsWith('piano://')) {
+      final id = url.replaceAll('piano://', '');
+      if (id.isNotEmpty) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => PianoGame(
+              deviceId: widget.deviceId,
+              pianoId: id,
+            ),
+          ),
+        );
+        return true;
+      }
+    }
+    return false;
   }
 
   @override
@@ -91,7 +114,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
           children: [
             if (course!.illustration.isNotEmpty)
               AspectRatio(
-                aspectRatio: 16/9,
+                aspectRatio: 16 / 9,
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(8),
                   child: Image.network(
@@ -135,10 +158,52 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
                     height: 1.5,
                   ),
               onTapUrl: (url) {
-                debugPrint('Clicked: $url');
+              
+                if (url.startsWith('piano://')) {
+                  return _handleHtmlLinkTap(url);
+                }
+           
                 return false;
               },
+              customWidgetBuilder: (element) {
+                if (element.localName == 'button' && 
+                    element.attributes['data-piano-id'] != null) {
+                  return ElevatedButton(
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => PianoGame(
+                            deviceId: widget.deviceId,
+                            pianoId: element.attributes['data-piano-id']!,
+                          ),
+                        ),
+                      );
+                    },
+                    child: Text(element.text),
+                  );
+                }
+                return null;
+              },
             ),
+         
+            if (pianoId != null) ...[
+              const SizedBox(height: 24),
+              ElevatedButton(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => PianoGame(
+                        deviceId: widget.deviceId,
+                        pianoId: pianoId.toString(),
+                      ),
+                    ),
+                  );
+                },
+                child: const Text('Play Piano Melody'),
+              ),
+            ],
           ],
         ),
       ),
